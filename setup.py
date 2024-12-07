@@ -19,18 +19,13 @@ with open("requirements-strict.txt") as f:
     required_strict = f.read().splitlines()
 
 setup(
-    name="mageic",
-    version="0.13.7",
+    name="hyvideo",
+    version="0.1.0",
     packages=find_packages(),
     license=open("LICENSE.txt").read(),
     long_description=open("README.md").read(),
     install_requires=required,
     extras_require={
         "strict": required_strict,
-    },
-    entry_points={
-        "console_scripts": [
-            "mageic=mageic.cli:main",
-        ],
     },
 )
