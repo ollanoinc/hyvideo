@@ -415,7 +415,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
         self,
-        args: Any,
+        text_states_dim: int = 4096,
+        text_states_dim_2: int = 768,
         patch_size: list = [1, 2, 2],
         in_channels: int = 4,  # Should be VAE.config.latent_channels.
         out_channels: int = None,
@@ -450,8 +451,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         self.use_attention_mask = use_attention_mask
         self.text_projection = text_projection
 
-        self.text_states_dim = args.text_states_dim
-        self.text_states_dim_2 = args.text_states_dim_2
+        self.text_states_dim = text_states_dim
+        self.text_states_dim_2 = text_states_dim_2
 
         if hidden_size % heads_num != 0:
             raise ValueError(
