@@ -71,7 +71,6 @@ class Inference(object):
 
         # =========================== Build main model ===========================
         logger.info("Building model...")
-        factor_kwargs = {"device": device, "dtype": PRECISION_TO_TYPE[args.precision]}
         in_channels = args.latent_channels
         out_channels = args.latent_channels
 
@@ -79,7 +78,6 @@ class Inference(object):
             args,
             in_channels=in_channels,
             out_channels=out_channels,
-            factor_kwargs=factor_kwargs,
         )
         model = model.to(device)
         model = Inference.load_state_dict(args, model, pretrained_model_path)
