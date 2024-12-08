@@ -8,8 +8,6 @@ class RMSNorm(nn.Module):
         dim: int,
         elementwise_affine=True,
         eps: float = 1e-6,
-        device=None,
-        dtype=None,
     ):
         """
         Initialize the RMSNorm normalization layer.
@@ -23,11 +21,10 @@ class RMSNorm(nn.Module):
             weight (nn.Parameter): Learnable scaling parameter.
 
         """
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.eps = eps
         if elementwise_affine:
-            self.weight = nn.Parameter(torch.ones(dim, **factory_kwargs))
+            self.weight = nn.Parameter(torch.ones(dim))
 
     def _norm(self, x):
         """

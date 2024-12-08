@@ -28,10 +28,7 @@ class PatchEmbed(nn.Module):
         norm_layer=None,
         flatten=True,
         bias=True,
-        dtype=None,
-        device=None,
     ):
-        factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
         patch_size = to_2tuple(patch_size)
         self.patch_size = patch_size
@@ -43,7 +40,6 @@ class PatchEmbed(nn.Module):
             kernel_size=patch_size,
             stride=patch_size,
             bias=bias,
-            **factory_kwargs
         )
         nn.init.xavier_uniform_(self.proj.weight.view(self.proj.weight.size(0), -1))
         if bias:
@@ -66,21 +62,18 @@ class TextProjection(nn.Module):
     Adapted from https://github.com/PixArt-alpha/PixArt-alpha/blob/master/diffusion/model/nets/PixArt_blocks.py
     """
 
-    def __init__(self, in_channels, hidden_size, act_layer, dtype=None, device=None):
-        factory_kwargs = {"dtype": dtype, "device": device}
+    def __init__(self, in_channels, hidden_size, act_layer):
         super().__init__()
         self.linear_1 = nn.Linear(
             in_features=in_channels,
             out_features=hidden_size,
             bias=True,
-            **factory_kwargs
         )
         self.act_1 = act_layer()
         self.linear_2 = nn.Linear(
             in_features=hidden_size,
             out_features=hidden_size,
             bias=True,
-            **factory_kwargs
         )
 
     def forward(self, caption):
@@ -129,10 +122,7 @@ class TimestepEmbedder(nn.Module):
         frequency_embedding_size=256,
         max_period=10000,
         out_size=None,
-        dtype=None,
-        device=None,
     ):
-        factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
@@ -140,11 +130,9 @@ class TimestepEmbedder(nn.Module):
             out_size = hidden_size
 
         self.mlp = nn.Sequential(
-            nn.Linear(
-                frequency_embedding_size, hidden_size, bias=True, **factory_kwargs
-            ),
+            nn.Linear(frequency_embedding_size, hidden_size, bias=True),
             act_layer(),
-            nn.Linear(hidden_size, out_size, bias=True, **factory_kwargs),
+            nn.Linear(hidden_size, out_size, bias=True),
         )
         nn.init.normal_(self.mlp[0].weight, std=0.02)
         nn.init.normal_(self.mlp[2].weight, std=0.02)

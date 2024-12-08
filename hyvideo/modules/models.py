@@ -34,10 +34,7 @@ class MMDoubleStreamBlock(nn.Module):
         qk_norm: bool = True,
         qk_norm_type: str = "rms",
         qkv_bias: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
 
         self.deterministic = False
@@ -49,77 +46,57 @@ class MMDoubleStreamBlock(nn.Module):
             hidden_size,
             factor=6,
             act_layer=get_activation_layer("silu"),
-            **factory_kwargs,
         )
-        self.img_norm1 = nn.LayerNorm(
-            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
-        )
+        self.img_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
-        self.img_attn_qkv = nn.Linear(
-            hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs
-        )
+        self.img_attn_qkv = nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias)
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.img_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
         self.img_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
-        self.img_attn_proj = nn.Linear(
-            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
-        )
+        self.img_attn_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias)
 
-        self.img_norm2 = nn.LayerNorm(
-            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
-        )
+        self.img_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.img_mlp = MLP(
             hidden_size,
             mlp_hidden_dim,
             act_layer=get_activation_layer(mlp_act_type),
             bias=True,
-            **factory_kwargs,
         )
 
         self.txt_mod = ModulateDiT(
             hidden_size,
             factor=6,
             act_layer=get_activation_layer("silu"),
-            **factory_kwargs,
         )
-        self.txt_norm1 = nn.LayerNorm(
-            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
-        )
+        self.txt_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
-        self.txt_attn_qkv = nn.Linear(
-            hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs
-        )
+        self.txt_attn_qkv = nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias)
         self.txt_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
         self.txt_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
-        self.txt_attn_proj = nn.Linear(
-            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
-        )
+        self.txt_attn_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias)
 
-        self.txt_norm2 = nn.LayerNorm(
-            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
-        )
+        self.txt_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.txt_mlp = MLP(
             hidden_size,
             mlp_hidden_dim,
             act_layer=get_activation_layer(mlp_act_type),
             bias=True,
-            **factory_kwargs,
         )
 
     def enable_deterministic(self):
@@ -252,10 +229,7 @@ class MMSingleStreamBlock(nn.Module):
         qk_norm: bool = True,
         qk_norm_type: str = "rms",
         qk_scale: float = None,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
 
         self.deterministic = False
@@ -267,36 +241,29 @@ class MMSingleStreamBlock(nn.Module):
         self.scale = qk_scale or head_dim**-0.5
 
         # qkv and mlp_in
-        self.linear1 = nn.Linear(
-            hidden_size, hidden_size * 3 + mlp_hidden_dim, **factory_kwargs
-        )
+        self.linear1 = nn.Linear(hidden_size, hidden_size * 3 + mlp_hidden_dim)
         # proj and mlp_out
-        self.linear2 = nn.Linear(
-            hidden_size + mlp_hidden_dim, hidden_size, **factory_kwargs
-        )
+        self.linear2 = nn.Linear(hidden_size + mlp_hidden_dim, hidden_size)
 
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
         self.k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
 
-        self.pre_norm = nn.LayerNorm(
-            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
-        )
+        self.pre_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
         self.mlp_act = get_activation_layer(mlp_act_type)()
         self.modulation = ModulateDiT(
             hidden_size,
             factor=3,
             act_layer=get_activation_layer("silu"),
-            **factory_kwargs,
         )
 
     def enable_deterministic(self):
@@ -372,8 +339,10 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
     Parameters
     ----------
-    args: argparse.Namespace
-        The arguments parsed by argparse.
+    text_states_dim: int
+        Dimension of the text states.
+    text_states_dim_2: int
+        Dimension of the text states for modulation.
     patch_size: list
         The size of the patch.
     in_channels: int
@@ -406,10 +375,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         The type of the text projection, default is single_refiner.
     use_attention_mask: bool
         Whether to use attention mask for text encoder.
-    dtype: torch.dtype
-        The dtype of the model.
-    device: torch.device
-        The device of the model.
     """
 
     @register_to_config
@@ -433,10 +398,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         guidance_embed: bool = False,  # For modulation.
         text_projection: str = "single_refiner",
         use_attention_mask: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
 
         self.patch_size = patch_size
@@ -468,7 +430,9 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # image projection
         self.img_in = PatchEmbed(
-            self.patch_size, self.in_channels, self.hidden_size, **factory_kwargs
+            self.patch_size,
+            self.in_channels,
+            self.hidden_size,
         )
 
         # text projection
@@ -477,11 +441,10 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 self.text_states_dim,
                 self.hidden_size,
                 get_activation_layer("silu"),
-                **factory_kwargs,
             )
         elif self.text_projection == "single_refiner":
             self.txt_in = SingleTokenRefiner(
-                self.text_states_dim, hidden_size, heads_num, depth=2, **factory_kwargs
+                self.text_states_dim, hidden_size, heads_num, depth=2
             )
         else:
             raise NotImplementedError(
@@ -489,20 +452,14 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             )
 
         # time modulation
-        self.time_in = TimestepEmbedder(
-            self.hidden_size, get_activation_layer("silu"), **factory_kwargs
-        )
+        self.time_in = TimestepEmbedder(self.hidden_size, get_activation_layer("silu"))
 
         # text modulation
-        self.vector_in = MLPEmbedder(
-            self.text_states_dim_2, self.hidden_size, **factory_kwargs
-        )
+        self.vector_in = MLPEmbedder(self.text_states_dim_2, self.hidden_size)
 
         # guidance modulation
         self.guidance_in = (
-            TimestepEmbedder(
-                self.hidden_size, get_activation_layer("silu"), **factory_kwargs
-            )
+            TimestepEmbedder(self.hidden_size, get_activation_layer("silu"))
             if guidance_embed
             else None
         )
@@ -518,7 +475,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
                     qkv_bias=qkv_bias,
-                    **factory_kwargs,
                 )
                 for _ in range(mm_double_blocks_depth)
             ]
@@ -534,7 +490,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     mlp_act_type=mlp_act_type,
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
-                    **factory_kwargs,
                 )
                 for _ in range(mm_single_blocks_depth)
             ]
@@ -545,7 +500,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             self.patch_size,
             self.out_channels,
             get_activation_layer("silu"),
-            **factory_kwargs,
         )
 
     def enable_deterministic(self):

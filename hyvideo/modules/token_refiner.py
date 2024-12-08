@@ -24,51 +24,39 @@ class IndividualTokenRefinerBlock(nn.Module):
         qk_norm: bool = False,
         qk_norm_type: str = "layer",
         qkv_bias: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.heads_num = heads_num
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
 
-        self.norm1 = nn.LayerNorm(
-            hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs
-        )
-        self.self_attn_qkv = nn.Linear(
-            hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs
-        )
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
+        self.self_attn_qkv = nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias)
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.self_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
         self.self_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6)
             if qk_norm
             else nn.Identity()
         )
-        self.self_attn_proj = nn.Linear(
-            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
-        )
+        self.self_attn_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias)
 
-        self.norm2 = nn.LayerNorm(
-            hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs
-        )
+        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         act_layer = get_activation_layer(act_type)
         self.mlp = MLP(
             in_channels=hidden_size,
             hidden_channels=mlp_hidden_dim,
             act_layer=act_layer,
             drop=mlp_drop_rate,
-            **factory_kwargs,
         )
 
         self.adaLN_modulation = nn.Sequential(
             act_layer(),
-            nn.Linear(hidden_size, 2 * hidden_size, bias=True, **factory_kwargs),
+            nn.Linear(hidden_size, 2 * hidden_size, bias=True),
         )
         # Zero-initialize the modulation
         nn.init.zeros_(self.adaLN_modulation[1].weight)
@@ -112,10 +100,7 @@ class IndividualTokenRefiner(nn.Module):
         qk_norm: bool = False,
         qk_norm_type: str = "layer",
         qkv_bias: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.blocks = nn.ModuleList(
             [
@@ -128,7 +113,6 @@ class IndividualTokenRefiner(nn.Module):
                     qk_norm=qk_norm,
                     qk_norm_type=qk_norm_type,
                     qkv_bias=qkv_bias,
-                    **factory_kwargs,
                 )
                 for _ in range(depth)
             ]
@@ -179,25 +163,18 @@ class SingleTokenRefiner(nn.Module):
         qk_norm_type: str = "layer",
         qkv_bias: bool = True,
         attn_mode: str = "torch",
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.attn_mode = attn_mode
         assert self.attn_mode == "torch", "Only support 'torch' mode for token refiner."
 
-        self.input_embedder = nn.Linear(
-            in_channels, hidden_size, bias=True, **factory_kwargs
-        )
+        self.input_embedder = nn.Linear(in_channels, hidden_size, bias=True)
 
         act_layer = get_activation_layer(act_type)
         # Build timestep embedding layer
-        self.t_embedder = TimestepEmbedder(hidden_size, act_layer, **factory_kwargs)
+        self.t_embedder = TimestepEmbedder(hidden_size, act_layer)
         # Build context embedding layer
-        self.c_embedder = TextProjection(
-            in_channels, hidden_size, act_layer, **factory_kwargs
-        )
+        self.c_embedder = TextProjection(in_channels, hidden_size, act_layer)
 
         self.individual_token_refiner = IndividualTokenRefiner(
             hidden_size=hidden_size,
@@ -209,7 +186,6 @@ class SingleTokenRefiner(nn.Module):
             qk_norm=qk_norm,
             qk_norm_type=qk_norm_type,
             qkv_bias=qkv_bias,
-            **factory_kwargs,
         )
 
     def forward(

@@ -12,15 +12,10 @@ class ModulateDiT(nn.Module):
         hidden_size: int,
         factor: int,
         act_layer: Callable,
-        dtype=None,
-        device=None,
     ):
-        factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
         self.act = act_layer()
-        self.linear = nn.Linear(
-            hidden_size, factor * hidden_size, bias=True, **factory_kwargs
-        )
+        self.linear = nn.Linear(hidden_size, factor * hidden_size, bias=True)
         # Zero-initialize the modulation
         nn.init.zeros_(self.linear.weight)
         nn.init.zeros_(self.linear.bias)

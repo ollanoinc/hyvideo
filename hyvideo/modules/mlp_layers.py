@@ -23,10 +23,7 @@ class MLP(nn.Module):
         bias=True,
         drop=0.0,
         use_conv=False,
-        device=None,
-        dtype=None,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         out_features = out_features or in_channels
         hidden_channels = hidden_channels or in_channels
@@ -34,19 +31,13 @@ class MLP(nn.Module):
         drop_probs = to_2tuple(drop)
         linear_layer = partial(nn.Conv2d, kernel_size=1) if use_conv else nn.Linear
 
-        self.fc1 = linear_layer(
-            in_channels, hidden_channels, bias=bias[0], **factory_kwargs
-        )
+        self.fc1 = linear_layer(in_channels, hidden_channels, bias=bias[0])
         self.act = act_layer()
         self.drop1 = nn.Dropout(drop_probs[0])
         self.norm = (
-            norm_layer(hidden_channels, **factory_kwargs)
-            if norm_layer is not None
-            else nn.Identity()
+            norm_layer(hidden_channels) if norm_layer is not None else nn.Identity()
         )
-        self.fc2 = linear_layer(
-            hidden_channels, out_features, bias=bias[1], **factory_kwargs
-        )
+        self.fc2 = linear_layer(hidden_channels, out_features, bias=bias[1])
         self.drop2 = nn.Dropout(drop_probs[1])
 
     def forward(self, x):
@@ -63,12 +54,11 @@ class MLP(nn.Module):
 class MLPEmbedder(nn.Module):
     """copied from https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py"""
 
-    def __init__(self, in_dim: int, hidden_dim: int, device=None, dtype=None):
-        factory_kwargs = {"device": device, "dtype": dtype}
+    def __init__(self, in_dim: int, hidden_dim: int):
         super().__init__()
-        self.in_layer = nn.Linear(in_dim, hidden_dim, bias=True, **factory_kwargs)
+        self.in_layer = nn.Linear(in_dim, hidden_dim, bias=True)
         self.silu = nn.SiLU()
-        self.out_layer = nn.Linear(hidden_dim, hidden_dim, bias=True, **factory_kwargs)
+        self.out_layer = nn.Linear(hidden_dim, hidden_dim, bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.out_layer(self.silu(self.in_layer(x)))
@@ -77,22 +67,16 @@ class MLPEmbedder(nn.Module):
 class FinalLayer(nn.Module):
     """The final layer of DiT."""
 
-    def __init__(
-        self, hidden_size, patch_size, out_channels, act_layer, device=None, dtype=None
-    ):
-        factory_kwargs = {"device": device, "dtype": dtype}
+    def __init__(self, hidden_size, patch_size, out_channels, act_layer):
         super().__init__()
 
         # Just use LayerNorm for the final layer
-        self.norm_final = nn.LayerNorm(
-            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
-        )
+        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         if isinstance(patch_size, int):
             self.linear = nn.Linear(
                 hidden_size,
                 patch_size * patch_size * out_channels,
                 bias=True,
-                **factory_kwargs
             )
         else:
             self.linear = nn.Linear(
@@ -106,7 +90,7 @@ class FinalLayer(nn.Module):
         # Here we don't distinguish between the modulate types. Just use the simple one.
         self.adaLN_modulation = nn.Sequential(
             act_layer(),
-            nn.Linear(hidden_size, 2 * hidden_size, bias=True, **factory_kwargs),
+            nn.Linear(hidden_size, 2 * hidden_size, bias=True),
         )
         # Zero-initialize the modulation
         nn.init.zeros_(self.adaLN_modulation[1].weight)
