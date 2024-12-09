@@ -23,6 +23,13 @@ import numpy as np
 from dataclasses import dataclass
 from packaging import version
 
+from transformers import (
+    LlamaForCausalLM,
+    LlamaTokenizerFast,
+    CLIPTextModel,
+    CLIPTokenizer,
+)
+
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.configuration_utils import FrozenDict
 from diffusers.image_processor import VaeImageProcessor
@@ -42,10 +49,10 @@ from diffusers.utils.torch_utils import randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import BaseOutput
 
-from ...constants import PRECISION_TO_TYPE
+from ...constants import PROMPT_TEMPLATE
 from ...vae.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
-from ...text_encoder import TextEncoder
 from ...modules import HYVideoDiffusionTransformer
+from ...modules.posemb_layers import get_nd_rotary_pos_embed
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -168,24 +175,14 @@ class HunyuanVideoPipeline(DiffusionPipeline):
     def __init__(
         self,
         vae: AutoencoderKL,
-        text_encoder: TextEncoder,
+        text_encoder: LlamaForCausalLM,
+        tokenizer: LlamaTokenizerFast,
         transformer: HYVideoDiffusionTransformer,
         scheduler: KarrasDiffusionSchedulers,
-        text_encoder_2: Optional[TextEncoder] = None,
-        progress_bar_config: Dict[str, Any] = None,
-        args=None,
+        text_encoder_2: Optional[CLIPTextModel] = None,
+        tokenizer_2: Optional[CLIPTokenizer] = None,
     ):
         super().__init__()
-
-        # ==========================================================================================
-        if progress_bar_config is None:
-            progress_bar_config = {}
-        if not hasattr(self, "_progress_bar_config"):
-            self._progress_bar_config = {}
-        self._progress_bar_config.update(progress_bar_config)
-
-        self.args = args
-        # ==========================================================================================
 
         if (
             hasattr(scheduler.config, "steps_offset")
@@ -227,9 +224,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         self.register_modules(
             vae=vae,
             text_encoder=text_encoder,
+            text_encoder_2=text_encoder_2,
+            tokenizer=tokenizer,
+            tokenizer_2=tokenizer_2,
             transformer=transformer,
             scheduler=scheduler,
-            text_encoder_2=text_encoder_2,
         )
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
@@ -242,218 +241,329 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         """
         self.vae.enable_tiling()
 
-    def encode_prompt(
+    @staticmethod
+    def _apply_prompt_template(
+        text: Union[str, List[str]], template: Union[str, List]
+    ) -> Union[str, List[str]]:
+        """Apply template to input text."""
+        if isinstance(template, str):
+            if isinstance(text, list):
+                return [template.format(t) for t in text]
+            return template.format(text)
+        else:
+            raise TypeError(f"Unsupported template type: {type(template)}")
+
+    def _get_llama_prompt_embeds(
         self,
-        prompt,
-        device,
-        num_videos_per_prompt,
-        do_classifier_free_guidance,
-        negative_prompt=None,
-        prompt_embeds: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        negative_prompt_embeds: Optional[torch.Tensor] = None,
-        negative_attention_mask: Optional[torch.Tensor] = None,
-        lora_scale: Optional[float] = None,
-        clip_skip: Optional[int] = None,
-        text_encoder: Optional[TextEncoder] = None,
-        data_type: Optional[str] = "image",
-    ):
-        r"""
-        Encodes the prompt into text encoder hidden states.
-
-        Args:
-            prompt (`str` or `List[str]`, *optional*):
-                prompt to be encoded
-            device: (`torch.device`):
-                torch device
-            num_videos_per_prompt (`int`):
-                number of videos that should be generated per prompt
-            do_classifier_free_guidance (`bool`):
-                whether to use classifier free guidance or not
-            negative_prompt (`str` or `List[str]`, *optional*):
-                The prompt or prompts not to guide the video generation. If not defined, one has to pass
-                `negative_prompt_embeds` instead. Ignored when not using guidance (i.e., ignored if `guidance_scale` is
-                less than `1`).
-            prompt_embeds (`torch.Tensor`, *optional*):
-                Pre-generated text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt weighting. If not
-                provided, text embeddings will be generated from `prompt` input argument.
-            attention_mask (`torch.Tensor`, *optional*):
-            negative_prompt_embeds (`torch.Tensor`, *optional*):
-                Pre-generated negative text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt
-                weighting. If not provided, negative_prompt_embeds will be generated from `negative_prompt` input
-                argument.
-            negative_attention_mask (`torch.Tensor`, *optional*):
-            lora_scale (`float`, *optional*):
-                A LoRA scale that will be applied to all LoRA layers of the text encoder if LoRA layers are loaded.
-            clip_skip (`int`, *optional*):
-                Number of layers to be skipped from CLIP while computing the prompt embeddings. A value of 1 means that
-                the output of the pre-final layer will be used for computing the prompt embeddings.
-            text_encoder (TextEncoder, *optional*):
-            data_type (`str`, *optional*):
+        prompt: Union[str, List[str]] = None,
+        num_videos_per_prompt: int = 1,
+        max_sequence_length: int = 256,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+        prompt_template: Optional[Dict] = None,
+        do_classifier_free_guidance: bool = True,
+        negative_prompt: Optional[Union[str, List[str]]] = None,
+    ) -> Tuple[
+        torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor]
+    ]:
         """
-        if text_encoder is None:
-            text_encoder = self.text_encoder
+        Get embeddings from LLAMA model.
 
-        # set lora scale so that monkey patched LoRA
-        # function of text encoder can correctly access it
-        if lora_scale is not None and isinstance(self, LoraLoaderMixin):
-            self._lora_scale = lora_scale
+        Returns:
+            Tuple containing:
+            - prompt_embeds: Tensor of shape (batch_size * num_videos_per_prompt, sequence_length, hidden_size)
+            - negative_prompt_embeds: Optional tensor of same shape as prompt_embeds
+            - prompt_attention_mask: Attention mask for prompt_embeds
+            - negative_attention_mask: Optional attention mask for negative_prompt_embeds
+        """
+        if device is None:
+            device = self.text_encoder.device
 
-            # dynamically adjust the LoRA scale
-            if not USE_PEFT_BACKEND:
-                adjust_lora_scale_text_encoder(text_encoder.model, lora_scale)
-            else:
-                scale_lora_layers(text_encoder.model, lora_scale)
+        if dtype is None:
+            dtype = self.text_encoder.dtype
 
+        # Handle batching
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
             batch_size = len(prompt)
         else:
-            batch_size = prompt_embeds.shape[0]
+            raise ValueError("prompt must be either str or List[str]")
 
-        if prompt_embeds is None:
-            # textual inversion: process multi-vector tokens if necessary
-            if isinstance(self, TextualInversionLoaderMixin):
-                prompt = self.maybe_convert_prompt(prompt, text_encoder.tokenizer)
+        # Apply template if provided
+        if prompt_template is not None:
+            if (
+                not isinstance(prompt_template, dict)
+                or "template" not in prompt_template
+            ):
+                raise ValueError("prompt_template must be a dict with 'template' key")
+            prompt = self._apply_prompt_template(prompt, prompt_template["template"])
 
-            text_inputs = text_encoder.text2tokens(prompt, data_type=data_type)
+        # Tokenize prompts
+        text_inputs = self.tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=max_sequence_length,
+            truncation=True,
+            return_tensors="pt",
+            return_attention_mask=True,
+        )
 
-            if clip_skip is None:
-                prompt_outputs = text_encoder.encode(
-                    text_inputs, data_type=data_type, device=device
-                )
-                prompt_embeds = prompt_outputs.hidden_state
-            else:
-                prompt_outputs = text_encoder.encode(
-                    text_inputs,
-                    output_hidden_states=True,
-                    data_type=data_type,
-                    device=device,
-                )
-                # Access the `hidden_states` first, that contains a tuple of
-                # all the hidden states from the encoder layers. Then index into
-                # the tuple to access the hidden states from the desired layer.
-                prompt_embeds = prompt_outputs.hidden_states_list[-(clip_skip + 1)]
-                # We also need to apply the final LayerNorm here to not mess with the
-                # representations. The `last_hidden_states` that we typically use for
-                # obtaining the final prompt representations passes through the LayerNorm
-                # layer.
-                prompt_embeds = text_encoder.model.text_model.final_layer_norm(
-                    prompt_embeds
-                )
+        prompt_embeds = self.text_encoder(
+            text_inputs.input_ids.to(device),
+            attention_mask=text_inputs.attention_mask.to(device),
+            output_hidden_states=True,
+            return_dict=True,
+        ).hidden_states[
+            -1
+        ]  # Get last hidden state
 
-            attention_mask = prompt_outputs.attention_mask
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
-                bs_embed, seq_len = attention_mask.shape
-                attention_mask = attention_mask.repeat(1, num_videos_per_prompt)
-                attention_mask = attention_mask.view(
-                    bs_embed * num_videos_per_prompt, seq_len
-                )
+        attention_mask = text_inputs.attention_mask
 
-        if text_encoder is not None:
-            prompt_embeds_dtype = text_encoder.dtype
-        elif self.transformer is not None:
-            prompt_embeds_dtype = self.transformer.dtype
-        else:
-            prompt_embeds_dtype = prompt_embeds.dtype
+        # Handle negative prompts if doing classifier free guidance
+        negative_prompt_embeds = None
+        negative_attention_mask = None
 
-        prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
-
-        if prompt_embeds.ndim == 2:
-            bs_embed, _ = prompt_embeds.shape
-            # duplicate text embeddings for each generation per prompt, using mps friendly method
-            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
-            prompt_embeds = prompt_embeds.view(bs_embed * num_videos_per_prompt, -1)
-        else:
-            bs_embed, seq_len, _ = prompt_embeds.shape
-            # duplicate text embeddings for each generation per prompt, using mps friendly method
-            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-            prompt_embeds = prompt_embeds.view(
-                bs_embed * num_videos_per_prompt, seq_len, -1
-            )
-
-        # get unconditional embeddings for classifier free guidance
-        if do_classifier_free_guidance and negative_prompt_embeds is None:
-            uncond_tokens: List[str]
+        if do_classifier_free_guidance:
             if negative_prompt is None:
                 uncond_tokens = [""] * batch_size
-            elif prompt is not None and type(prompt) is not type(negative_prompt):
-                raise TypeError(
-                    f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
-                    f" {type(prompt)}."
-                )
             elif isinstance(negative_prompt, str):
                 uncond_tokens = [negative_prompt]
-            elif batch_size != len(negative_prompt):
-                raise ValueError(
-                    f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
-                    f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                    " the batch size of `prompt`."
-                )
             else:
                 uncond_tokens = negative_prompt
 
-            # textual inversion: process multi-vector tokens if necessary
-            if isinstance(self, TextualInversionLoaderMixin):
-                uncond_tokens = self.maybe_convert_prompt(
-                    uncond_tokens, text_encoder.tokenizer
+            if prompt_template is not None:
+                uncond_tokens = self._apply_template(
+                    uncond_tokens, prompt_template["template"]
                 )
 
-            # max_length = prompt_embeds.shape[1]
-            uncond_input = text_encoder.text2tokens(uncond_tokens, data_type=data_type)
-
-            negative_prompt_outputs = text_encoder.encode(
-                uncond_input, data_type=data_type, device=device
-            )
-            negative_prompt_embeds = negative_prompt_outputs.hidden_state
-
-            negative_attention_mask = negative_prompt_outputs.attention_mask
-            if negative_attention_mask is not None:
-                negative_attention_mask = negative_attention_mask.to(device)
-                _, seq_len = negative_attention_mask.shape
-                negative_attention_mask = negative_attention_mask.repeat(
-                    1, num_videos_per_prompt
-                )
-                negative_attention_mask = negative_attention_mask.view(
-                    batch_size * num_videos_per_prompt, seq_len
-                )
-
-        if do_classifier_free_guidance:
-            # duplicate unconditional embeddings for each generation per prompt, using mps friendly method
-            seq_len = negative_prompt_embeds.shape[1]
-
-            negative_prompt_embeds = negative_prompt_embeds.to(
-                dtype=prompt_embeds_dtype, device=device
+            uncond_input = self.tokenizer(
+                uncond_tokens,
+                padding="max_length",
+                max_length=max_sequence_length,
+                truncation=True,
+                return_tensors="pt",
+                return_attention_mask=True,
             )
 
-            if negative_prompt_embeds.ndim == 2:
-                negative_prompt_embeds = negative_prompt_embeds.repeat(
-                    1, num_videos_per_prompt
-                )
-                negative_prompt_embeds = negative_prompt_embeds.view(
-                    batch_size * num_videos_per_prompt, -1
-                )
-            else:
+            negative_prompt_embeds = self.text_encoder(
+                uncond_input.input_ids.to(device),
+                attention_mask=uncond_input.attention_mask.to(device),
+                output_hidden_states=True,
+                return_dict=True,
+            ).hidden_states[-1]
+
+            negative_attention_mask = uncond_input.attention_mask
+
+        # Repeat embeddings for each image per prompt
+        if num_videos_per_prompt > 1:
+            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+            attention_mask = attention_mask.repeat(1, num_videos_per_prompt)
+            if negative_prompt_embeds is not None:
                 negative_prompt_embeds = negative_prompt_embeds.repeat(
                     1, num_videos_per_prompt, 1
                 )
-                negative_prompt_embeds = negative_prompt_embeds.view(
-                    batch_size * num_videos_per_prompt, seq_len, -1
+                negative_attention_mask = negative_attention_mask.repeat(
+                    1, num_videos_per_prompt
                 )
 
-        if text_encoder is not None:
-            if isinstance(self, LoraLoaderMixin) and USE_PEFT_BACKEND:
-                # Retrieve the original scale by scaling back the LoRA layers
-                unscale_lora_layers(text_encoder.model, lora_scale)
+        return (
+            prompt_embeds.to(dtype),
+            negative_prompt_embeds.to(dtype)
+            if negative_prompt_embeds is not None
+            else None,
+            attention_mask.to(device),
+            negative_attention_mask.to(device)
+            if negative_attention_mask is not None
+            else None,
+        )
+
+    def _get_clip_prompt_embeds(
+        self,
+        prompt: Union[str, List[str]],
+        num_videos_per_prompt: int = 1,
+        device: Optional[torch.device] = None,
+        clip_skip: Optional[int] = None,
+        do_classifier_free_guidance: bool = True,
+        negative_prompt: Optional[Union[str, List[str]]] = None,
+        max_length: int = 77,
+    ) -> Tuple[
+        torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor]
+    ]:
+        """
+        Get embeddings from CLIP model.
+
+        Returns:
+            Tuple containing:
+            - prompt_embeds: Tensor of shape (batch_size * num_videos_per_prompt, sequence_length, hidden_size)
+            - negative_prompt_embeds: Optional tensor of same shape as prompt_embeds
+            - prompt_attention_mask: Attention mask for prompt_embeds
+            - negative_attention_mask: Optional attention mask for negative_prompt_embeds
+        """
+        if self.text_encoder_2 is None or self.tokenizer_2 is None:
+            raise ValueError("CLIP text encoder and tokenizer must be provided")
+
+        if device is None:
+            device = self.text_encoder_2.device
+
+        # Handle batching
+        if isinstance(prompt, str):
+            batch_size = 1
+        elif isinstance(prompt, list):
+            batch_size = len(prompt)
+        else:
+            raise ValueError("prompt must be either str or List[str]")
+
+        text_inputs = self.tokenizer_2(
+            prompt,
+            padding="max_length",
+            max_length=max_length,
+            truncation=True,
+            return_tensors="pt",
+            return_attention_mask=True,
+        )
+
+        if clip_skip is None:
+            prompt_embeds = self.text_encoder_2(
+                text_inputs.input_ids.to(device),
+                attention_mask=text_inputs.attention_mask.to(device),
+                return_dict=True,
+            ).last_hidden_state
+        else:
+            # Get the hidden states from the specified layer
+            outputs = self.text_encoder_2(
+                text_inputs.input_ids.to(device),
+                attention_mask=text_inputs.attention_mask.to(device),
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            # Access the hidden states from the desired layer
+            prompt_embeds = outputs.hidden_states[-(clip_skip + 1)]
+            # Apply final layer norm
+            prompt_embeds = self.text_encoder_2.text_model.final_layer_norm(
+                prompt_embeds
+            )
+
+        attention_mask = text_inputs.attention_mask
+
+        # Handle negative prompts if doing classifier free guidance
+        negative_prompt_embeds = None
+        negative_attention_mask = None
+
+        if do_classifier_free_guidance:
+            if negative_prompt is None:
+                uncond_tokens = [""] * batch_size
+            elif isinstance(negative_prompt, str):
+                uncond_tokens = [negative_prompt]
+            else:
+                uncond_tokens = negative_prompt
+
+            uncond_input = self.tokenizer_2(
+                uncond_tokens,
+                padding="max_length",
+                max_length=max_length,
+                truncation=True,
+                return_tensors="pt",
+                return_attention_mask=True,
+            )
+
+            if clip_skip is None:
+                negative_prompt_embeds = self.text_encoder_2(
+                    uncond_input.input_ids.to(device),
+                    attention_mask=uncond_input.attention_mask.to(device),
+                    return_dict=True,
+                ).last_hidden_state
+            else:
+                outputs = self.text_encoder_2(
+                    uncond_input.input_ids.to(device),
+                    attention_mask=uncond_input.attention_mask.to(device),
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                negative_prompt_embeds = outputs.hidden_states[-(clip_skip + 1)]
+                negative_prompt_embeds = (
+                    self.text_encoder_2.text_model.final_layer_norm(
+                        negative_prompt_embeds
+                    )
+                )
+
+            negative_attention_mask = uncond_input.attention_mask
+
+        # Repeat embeddings for each image per prompt
+        if num_videos_per_prompt > 1:
+            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+            attention_mask = attention_mask.repeat(1, num_videos_per_prompt)
+            if negative_prompt_embeds is not None:
+                negative_prompt_embeds = negative_prompt_embeds.repeat(
+                    1, num_videos_per_prompt, 1
+                )
+                negative_attention_mask = negative_attention_mask.repeat(
+                    1, num_videos_per_prompt
+                )
 
         return (
             prompt_embeds,
             negative_prompt_embeds,
-            attention_mask,
-            negative_attention_mask,
+            attention_mask.to(device),
+            negative_attention_mask.to(device)
+            if negative_attention_mask is not None
+            else None,
         )
+
+    def get_rotary_pos_embed(
+        self,
+        height: int,
+        width: int,
+        video_length: int,
+        rope_theta: int,
+        vae_ver: str,
+    ):
+        target_ndim = 3
+        ndim = 5 - 2
+        # 884
+        if "884" in vae_ver:
+            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
+        elif "888" in vae_ver:
+            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
+        else:
+            latents_size = [video_length, height // 8, width // 8]
+
+        if isinstance(self.transformer.patch_size, int):
+            assert all(s % self.transformer.patch_size == 0 for s in latents_size), (
+                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.transformer.patch_size}), "
+                f"but got {latents_size}."
+            )
+            rope_sizes = [s // self.transformer.patch_size for s in latents_size]
+        elif isinstance(self.transformer.patch_size, list):
+            assert all(
+                s % self.transformer.patch_size[idx] == 0
+                for idx, s in enumerate(latents_size)
+            ), (
+                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.transformer.patch_size}), "
+                f"but got {latents_size}."
+            )
+            rope_sizes = [
+                s // self.transformer.patch_size[idx]
+                for idx, s in enumerate(latents_size)
+            ]
+
+        if len(rope_sizes) != target_ndim:
+            rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
+        head_dim = self.transformer.hidden_size // self.transformer.heads_num
+        rope_dim_list = self.transformer.rope_dim_list
+        if rope_dim_list is None:
+            rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
+        assert (
+            sum(rope_dim_list) == head_dim
+        ), "sum(rope_dim_list) should equal to head_dim of attention layer"
+        freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
+            rope_dim_list,
+            rope_sizes,
+            theta=rope_theta,
+            use_real=True,
+            theta_rescale_factor=1,
+        )
+        return freqs_cos, freqs_sin
 
     def decode_latents(self, latents):
         deprecation_message = "The decode_latents method is deprecated and will be removed in 1.0.0. Please use VaeImageProcessor.postprocess(...) instead"
@@ -669,7 +779,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         height: int,
         width: int,
         video_length: int,
-        data_type: str = "video",
+        prompt_template: Optional[str] = PROMPT_TEMPLATE["dit-llm-encode-video"],
         num_inference_steps: int = 50,
         timesteps: List[int] = None,
         sigmas: List[float] = None,
@@ -680,9 +790,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.Tensor] = None,
         prompt_embeds: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
+        prompt_mask: Optional[torch.Tensor] = None,
         negative_prompt_embeds: Optional[torch.Tensor] = None,
-        negative_attention_mask: Optional[torch.Tensor] = None,
+        negative_prompt_mask: Optional[torch.Tensor] = None,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -696,8 +806,8 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             ]
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
-        vae_ver: str = "88-4c-sd",
+        rope_theta: int = 256,
+        vae_ver: str = "884-16c-hy",
         n_tokens: Optional[int] = None,
         embedded_guidance_scale: Optional[float] = None,
         **kwargs,
@@ -749,7 +859,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             negative_prompt_embeds (`torch.Tensor`, *optional*):
                 Pre-generated negative text embeddings. Can be used to easily tweak text inputs (prompt weighting). If
                 not provided, `negative_prompt_embeds` are generated from the `negative_prompt` input argument.
-
             output_type (`str`, *optional*, defaults to `"pil"`):
                 The output format of the generated image. Choose between `PIL.Image` or `np.array`.
             return_dict (`bool`, *optional*, defaults to `True`):
@@ -838,32 +947,28 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
         device = self._execution_device
 
-        # 3. Encode input prompt
-        lora_scale = (
-            self.cross_attention_kwargs.get("scale", None)
-            if self.cross_attention_kwargs is not None
-            else None
+        freqs_cis = self.get_freqs_cis(
+            height=height,
+            width=width,
+            video_length=video_length,
+            rope_theta=rope_theta,
+            vae_ver=vae_ver,
         )
 
-        (
-            prompt_embeds,
-            negative_prompt_embeds,
-            prompt_mask,
-            negative_prompt_mask,
-        ) = self.encode_prompt(
-            prompt,
-            device,
-            num_videos_per_prompt,
-            self.do_classifier_free_guidance,
-            negative_prompt,
-            prompt_embeds=prompt_embeds,
-            attention_mask=attention_mask,
-            negative_prompt_embeds=negative_prompt_embeds,
-            negative_attention_mask=negative_attention_mask,
-            lora_scale=lora_scale,
-            clip_skip=self.clip_skip,
-            data_type=data_type,
-        )
+        # 3. Encode input prompt
+        if prompt_embeds is None:
+            (
+                prompt_embeds,
+                negative_prompt_embeds,
+                prompt_mask,
+                negative_prompt_mask,
+            ) = self._get_llama_prompt_embeds(
+                prompt,
+                prompt_template=prompt_template,
+                num_videos_per_prompt=num_videos_per_prompt,
+                do_classifier_free_guidance=self.do_classifier_free_guidance,
+                negative_prompt=negative_prompt,
+            )
         if self.text_encoder_2 is not None:
             (
                 prompt_embeds_2,
@@ -872,18 +977,10 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 negative_prompt_mask_2,
             ) = self.encode_prompt(
                 prompt,
-                device,
-                num_videos_per_prompt,
-                self.do_classifier_free_guidance,
-                negative_prompt,
-                prompt_embeds=None,
-                attention_mask=None,
-                negative_prompt_embeds=None,
-                negative_attention_mask=None,
-                lora_scale=lora_scale,
+                num_videos_per_prompt=num_videos_per_prompt,
                 clip_skip=self.clip_skip,
-                text_encoder=self.text_encoder_2,
-                data_type=data_type,
+                do_classifier_free_guidance=self.do_classifier_free_guidance,
+                negative_prompt=negative_prompt,
             )
         else:
             prompt_embeds_2 = None
@@ -943,15 +1040,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             {"generator": generator, "eta": eta},
         )
 
-        target_dtype = PRECISION_TO_TYPE[self.args.precision]
-        autocast_enabled = (
-            target_dtype != torch.float32
-        ) and not self.args.disable_autocast
-        vae_dtype = PRECISION_TO_TYPE[self.args.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32
-        ) and not self.args.disable_autocast
-
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
@@ -976,31 +1064,27 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 guidance_expand = (
                     torch.tensor(
                         [embedded_guidance_scale] * latent_model_input.shape[0],
-                        dtype=torch.float32,
+                        dtype=self.transformer.dtype,
                         device=device,
-                    ).to(target_dtype)
+                    )
                     * 1000.0
                     if embedded_guidance_scale is not None
                     else None
                 )
 
                 # predict the noise residual
-                with torch.autocast(
-                    device_type="cuda", dtype=target_dtype, enabled=autocast_enabled
-                ):
-                    noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
-                        latent_model_input,  # [2, 16, 33, 24, 42]
-                        t_expand,  # [2]
-                        text_states=prompt_embeds,  # [2, 256, 4096]
-                        text_mask=prompt_mask,  # [2, 256]
-                        text_states_2=prompt_embeds_2,  # [2, 768]
-                        freqs_cos=freqs_cis[0],  # [seqlen, head_dim]
-                        freqs_sin=freqs_cis[1],  # [seqlen, head_dim]
-                        guidance=guidance_expand,
-                        return_dict=True,
-                    )[
-                        "x"
-                    ]
+                noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
+                    latent_model_input,  # [2, 16, 33, 24, 42]
+                    t_expand,  # [2]
+                    text_states=prompt_embeds,  # [2, 256, 4096]
+                    text_mask=prompt_mask,  # [2, 256]
+                    text_states_2=prompt_embeds_2,  # [2, 768]
+                    freqs_cos=freqs_cis[0],  # [seqlen, head_dim]
+                    freqs_sin=freqs_cis[1],  # [seqlen, head_dim]
+                    guidance=guidance_expand,
+                    return_dict=True,
+                )
+                noise_pred = noise_pred["x"]
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -1068,12 +1152,9 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             else:
                 latents = latents / self.vae.config.scaling_factor
 
-            with torch.autocast(
-                device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled
-            ):
-                image = self.vae.decode(
-                    latents, return_dict=False, generator=generator
-                )[0]
+            image = self.vae.decode(
+                latents.to(self.vae.dtype), return_dict=False, generator=generator
+            )[0]
 
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)
