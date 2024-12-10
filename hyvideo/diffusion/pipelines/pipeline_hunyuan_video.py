@@ -946,7 +946,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
         device = self._execution_device
 
-        freqs_cis = self.get_freqs_cis(
+        freqs_cis = self.get_rotary_pos_embed(
             height=height,
             width=width,
             video_length=video_length,
