@@ -36,8 +36,6 @@ class MMDoubleStreamBlock(nn.Module):
         qkv_bias: bool = False,
     ):
         super().__init__()
-
-        self.deterministic = False
         self.heads_num = heads_num
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
@@ -98,12 +96,6 @@ class MMDoubleStreamBlock(nn.Module):
             act_layer=get_activation_layer(mlp_act_type),
             bias=True,
         )
-
-    def enable_deterministic(self):
-        self.deterministic = True
-
-    def disable_deterministic(self):
-        self.deterministic = False
 
     def forward(
         self,
@@ -231,8 +223,6 @@ class MMSingleStreamBlock(nn.Module):
         qk_scale: float = None,
     ):
         super().__init__()
-
-        self.deterministic = False
         self.hidden_size = hidden_size
         self.heads_num = heads_num
         head_dim = hidden_size // heads_num
@@ -265,12 +255,6 @@ class MMSingleStreamBlock(nn.Module):
             factor=3,
             act_layer=get_activation_layer("silu"),
         )
-
-    def enable_deterministic(self):
-        self.deterministic = True
-
-    def disable_deterministic(self):
-        self.deterministic = False
 
     def forward(
         self,
@@ -491,18 +475,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             get_activation_layer("silu"),
         )
 
-    def enable_deterministic(self):
-        for block in self.double_blocks:
-            block.enable_deterministic()
-        for block in self.single_blocks:
-            block.enable_deterministic()
-
-    def disable_deterministic(self):
-        for block in self.double_blocks:
-            block.disable_deterministic()
-        for block in self.single_blocks:
-            block.disable_deterministic()
-
     def forward(
         self,
         x: torch.Tensor,
@@ -543,14 +515,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # Embed image and text.
         img = self.img_in(img)
-        if self.text_projection == "linear":
-            txt = self.txt_in(txt)
-        elif self.text_projection == "single_refiner":
-            txt = self.txt_in(txt, t, text_mask if self.use_attention_mask else None)
-        else:
-            raise NotImplementedError(
-                f"Unsupported text_projection: {self.text_projection}"
-            )
+        txt = self.txt_in(txt, t, text_mask if self.use_attention_mask else None)
 
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]

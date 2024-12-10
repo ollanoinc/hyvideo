@@ -903,13 +903,15 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         # TODO(aryan): No idea why it won't run without this
         device = torch.device(self._execution_device)
 
+        target_dtype = self.transformer.dtype
+        vae_dtype = self.vae.dtype
         freqs_cis = self.get_rotary_pos_embed(
             height=height,
             width=width,
             video_length=video_length,
         )
-        target_dtype = self.transformer.dtype
-        vae_dtype = self.vae.dtype
+        freqs_cis[0] = freqs_cis[0].to(target_dtype)
+        freqs_cis[1] = freqs_cis[1].to(target_dtype)
 
         # 3. Encode input prompt
         if prompt_embeds is None:
