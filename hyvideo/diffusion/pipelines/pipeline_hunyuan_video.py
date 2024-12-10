@@ -344,7 +344,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         prompt: Union[str, List[str]],
         num_videos_per_prompt: int = 1,
         device: Optional[torch.device] = None,
-        clip_skip: Optional[int] = None,
         do_classifier_free_guidance: bool = True,
         negative_prompt: Optional[Union[str, List[str]]] = None,
         max_length: int = 77,
@@ -384,26 +383,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             return_attention_mask=True,
         )
 
-        if clip_skip is None:
-            prompt_embeds = self.text_encoder_2(
-                text_inputs.input_ids.to(device),
-                attention_mask=text_inputs.attention_mask.to(device),
-                return_dict=True,
-            ).last_hidden_state
-        else:
-            # Get the hidden states from the specified layer
-            outputs = self.text_encoder_2(
-                text_inputs.input_ids.to(device),
-                attention_mask=text_inputs.attention_mask.to(device),
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            # Access the hidden states from the desired layer
-            prompt_embeds = outputs.hidden_states[-(clip_skip + 1)]
-            # Apply final layer norm
-            prompt_embeds = self.text_encoder_2.text_model.final_layer_norm(
-                prompt_embeds
-            )
+        prompt_embeds = self.text_encoder_2(
+            text_inputs.input_ids.to(device),
+            attention_mask=text_inputs.attention_mask.to(device),
+            return_dict=True,
+        ).pooler_output
 
         attention_mask = text_inputs.attention_mask
 
@@ -428,25 +412,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 return_attention_mask=True,
             )
 
-            if clip_skip is None:
-                negative_prompt_embeds = self.text_encoder_2(
-                    uncond_input.input_ids.to(device),
-                    attention_mask=uncond_input.attention_mask.to(device),
-                    return_dict=True,
-                ).last_hidden_state
-            else:
-                outputs = self.text_encoder_2(
-                    uncond_input.input_ids.to(device),
-                    attention_mask=uncond_input.attention_mask.to(device),
-                    output_hidden_states=True,
-                    return_dict=True,
-                )
-                negative_prompt_embeds = outputs.hidden_states[-(clip_skip + 1)]
-                negative_prompt_embeds = (
-                    self.text_encoder_2.text_model.final_layer_norm(
-                        negative_prompt_embeds
-                    )
-                )
+            negative_prompt_embeds = self.text_encoder_2(
+                uncond_input.input_ids.to(device),
+                attention_mask=uncond_input.attention_mask.to(device),
+                return_dict=True,
+            ).pooler_output
 
             negative_attention_mask = uncond_input.attention_mask
 
@@ -897,7 +867,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             ) = self._get_clip_prompt_embeds(
                 prompt,
                 num_videos_per_prompt=num_videos_per_prompt,
-                clip_skip=self.clip_skip,
+                # clip_skip=self.clip_skip, TODO
                 do_classifier_free_guidance=self.do_classifier_free_guidance,
                 negative_prompt=negative_prompt,
             )
