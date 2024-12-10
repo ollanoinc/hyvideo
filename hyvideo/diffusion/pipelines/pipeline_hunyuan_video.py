@@ -88,7 +88,6 @@ def retrieve_timesteps(
     """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
-
     Args:
         scheduler (`SchedulerMixin`):
             The scheduler to get timesteps from.
@@ -103,7 +102,6 @@ def retrieve_timesteps(
         sigmas (`List[float]`, *optional*):
             Custom sigmas used to override the timestep spacing strategy of the scheduler. If `sigmas` is passed,
             `num_inference_steps` and `timesteps` must be `None`.
-
     Returns:
         `Tuple[torch.Tensor, int]`: A tuple where the first element is the timestep schedule from the scheduler and the
         second element is the number of inference steps.
@@ -183,43 +181,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         tokenizer_2: Optional[CLIPTokenizer] = None,
     ):
         super().__init__()
-
-        if (
-            hasattr(scheduler.config, "steps_offset")
-            and scheduler.config.steps_offset != 1
-        ):
-            deprecation_message = (
-                f"The configuration file of this scheduler: {scheduler} is outdated. `steps_offset`"
-                f" should be set to 1 instead of {scheduler.config.steps_offset}. Please make sure "
-                "to update the config accordingly as leaving `steps_offset` might led to incorrect results"
-                " in future versions. If you have downloaded this checkpoint from the Hugging Face Hub,"
-                " it would be very nice if you could open a Pull request for the `scheduler/scheduler_config.json`"
-                " file"
-            )
-            deprecate(
-                "steps_offset!=1", "1.0.0", deprecation_message, standard_warn=False
-            )
-            new_config = dict(scheduler.config)
-            new_config["steps_offset"] = 1
-            scheduler._internal_dict = FrozenDict(new_config)
-
-        if (
-            hasattr(scheduler.config, "clip_sample")
-            and scheduler.config.clip_sample is True
-        ):
-            deprecation_message = (
-                f"The configuration file of this scheduler: {scheduler} has not set the configuration `clip_sample`."
-                " `clip_sample` should be set to False in the configuration file. Please make sure to update the"
-                " config accordingly as not setting `clip_sample` in the config might lead to incorrect results in"
-                " future versions. If you have downloaded this checkpoint from the Hugging Face Hub, it would be very"
-                " nice if you could open a Pull request for the `scheduler/scheduler_config.json` file"
-            )
-            deprecate(
-                "clip_sample not set", "1.0.0", deprecation_message, standard_warn=False
-            )
-            new_config = dict(scheduler.config)
-            new_config["clip_sample"] = False
-            scheduler._internal_dict = FrozenDict(new_config)
 
         self.register_modules(
             vae=vae,
@@ -1032,9 +993,10 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 print(f"timestep: {timestep.shape} {timestep.dtype}")
                 print(f"prompt_embeds: {prompt_embeds.shape} {prompt_embeds.dtype}")
                 print(f"prompt_mask: {prompt_mask.shape} {prompt_mask.dtype}")
-                print(
-                    f"prompt_embeds_2: {prompt_embeds_2.shape} {prompt_embeds_2.dtype}"
-                )
+                if prompt_embeds_2 is not None:
+                    print(
+                        f"prompt_embeds_2: {prompt_embeds_2.shape} {prompt_embeds_2.dtype}"
+                    )
                 print(f"freqs_cos: {freqs_cos.shape} {freqs_cos.dtype}")
                 print(f"freqs_sin: {freqs_sin.shape} {freqs_sin.dtype}")
                 if guidance_expand is not None:

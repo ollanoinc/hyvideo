@@ -74,7 +74,6 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
         shift: float = 1.0,
         reverse: bool = True,
         solver: str = "euler",
-        n_tokens: Optional[int] = None,
     ):
         sigmas = torch.linspace(1, 0, num_train_timesteps + 1)
 
