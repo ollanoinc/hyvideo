@@ -905,13 +905,13 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
         target_dtype = self.transformer.dtype
         vae_dtype = self.vae.dtype
-        freqs_cis = self.get_rotary_pos_embed(
+        freqs_cos, freqs_sin = self.get_rotary_pos_embed(
             height=height,
             width=width,
             video_length=video_length,
         )
-        freqs_cis[0] = freqs_cis[0].to(target_dtype)
-        freqs_cis[1] = freqs_cis[1].to(target_dtype)
+        freqs_cos = freqs_cos.to(target_dtype)
+        freqs_sin = freqs_sin.to(target_dtype)
 
         # 3. Encode input prompt
         if prompt_embeds is None:
@@ -1035,8 +1035,8 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 print(
                     f"prompt_embeds_2: {prompt_embeds_2.shape} {prompt_embeds_2.dtype}"
                 )
-                print(f"freqs_cos: {freqs_cis[0].shape} {freqs_cis[0].dtype}")
-                print(f"freqs_sin: {freqs_cis[1].shape} {freqs_cis[1].dtype}")
+                print(f"freqs_cos: {freqs_cos.shape} {freqs_cos.dtype}")
+                print(f"freqs_sin: {freqs_sin.shape} {freqs_sin.dtype}")
                 if guidance_expand is not None:
                     print(
                         f"guidance_expand: {guidance_expand.shape} {guidance_expand.dtype}"
@@ -1049,8 +1049,8 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     text_states=prompt_embeds,  # [2, 256, 4096]
                     text_mask=prompt_mask,  # [2, 256]
                     text_states_2=prompt_embeds_2,  # [2, 768]
-                    freqs_cos=freqs_cis[0],  # [seqlen, head_dim]
-                    freqs_sin=freqs_cis[1],  # [seqlen, head_dim]
+                    freqs_cos=freqs_cos,  # [seqlen, head_dim]
+                    freqs_sin=freqs_sin,  # [seqlen, head_dim]
                     guidance=guidance_expand,
                     return_dict=False,
                 )

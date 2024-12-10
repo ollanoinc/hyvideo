@@ -355,8 +355,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         The type of qk norm.
     guidance_embed: bool
         Whether to use guidance embedding for distillation.
-    text_projection: str
-        The type of the text projection, default is single_refiner.
     use_attention_mask: bool
         Whether to use attention mask for text encoder.
     """
@@ -380,7 +378,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         qk_norm: bool = True,
         qk_norm_type: str = "rms",
         guidance_embed: bool = False,  # For modulation.
-        text_projection: str = "single_refiner",
         use_attention_mask: bool = True,
     ):
         super().__init__()
@@ -395,7 +392,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         # Text projection. Default to linear projection.
         # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
         self.use_attention_mask = use_attention_mask
-        self.text_projection = text_projection
 
         self.text_states_dim = text_states_dim
         self.text_states_dim_2 = text_states_dim_2
