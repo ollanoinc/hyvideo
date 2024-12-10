@@ -168,7 +168,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
     """
 
     model_cpu_offload_seq = "text_encoder->text_encoder_2->transformer->vae"
-    _optional_components = ["text_encoder_2"]
+    _optional_components = ["text_encoder_2", "tokenizer_2"]
     _exclude_from_cpu_offload = ["transformer"]
     _callback_tensor_inputs = ["latents", "prompt_embeds", "negative_prompt_embeds"]
 
@@ -808,7 +808,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         rope_theta: int = 256,
         vae_ver: str = "884-16c-hy",
-        n_tokens: Optional[int] = None,
         embedded_guidance_scale: Optional[float] = None,
         **kwargs,
     ):
@@ -954,6 +953,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             rope_theta=rope_theta,
             vae_ver=vae_ver,
         )
+        n_tokens = freqs_cis[0].shape[0]
 
         # 3. Encode input prompt
         if prompt_embeds is None:
