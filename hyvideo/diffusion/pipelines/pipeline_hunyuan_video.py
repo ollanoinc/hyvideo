@@ -714,7 +714,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         self,
         prompt: Union[str, List[str]],
         height: int = 768,
-        width: int = 1260,
+        width: int = 1280,
         video_length: int = 129,
         prompt_template: Optional[Dict] = PROMPT_TEMPLATE["dit-llm-encode-video"],
         num_inference_steps: int = 50,
