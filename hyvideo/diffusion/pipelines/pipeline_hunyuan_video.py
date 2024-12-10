@@ -1072,6 +1072,18 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     else None
                 )
 
+                # Log shapes of all inputs going into transformer
+                print("Input shapes:")
+                print(f"latent_model_input: {latent_model_input.shape}")
+                print(f"t_expand: {t_expand.shape}")
+                print(f"prompt_embeds: {prompt_embeds.shape}")
+                print(f"prompt_mask: {prompt_mask.shape}")
+                print(f"prompt_embeds_2: {prompt_embeds_2.shape}")
+                print(f"freqs_cos: {freqs_cis[0].shape}")
+                print(f"freqs_sin: {freqs_cis[1].shape}")
+                if guidance_expand is not None:
+                    print(f"guidance_expand: {guidance_expand.shape}")
+
                 # predict the noise residual
                 noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
                     latent_model_input,  # [2, 16, 33, 24, 42]
@@ -1082,9 +1094,8 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     freqs_cos=freqs_cis[0],  # [seqlen, head_dim]
                     freqs_sin=freqs_cis[1],  # [seqlen, head_dim]
                     guidance=guidance_expand,
-                    return_dict=True,
+                    return_dict=False,
                 )
-                noise_pred = noise_pred["x"]
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
