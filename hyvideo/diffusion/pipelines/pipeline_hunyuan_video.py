@@ -1014,7 +1014,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 guidance_expand = (
                     torch.tensor(
                         [embedded_guidance_scale] * latent_model_input.shape[0],
-                        dtype=torch.float32,
+                        dtype=target_dtype,
                         device=device,
                     )
                     * 1000.0
@@ -1024,15 +1024,21 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
                 # Log shapes of all inputs going into transformer
                 print("Input shapes:")
-                print(f"latent_model_input: {latent_model_input.shape}")
-                print(f"timestep: {timestep.shape}")
-                print(f"prompt_embeds: {prompt_embeds.shape}")
-                print(f"prompt_mask: {prompt_mask.shape}")
-                print(f"prompt_embeds_2: {prompt_embeds_2.shape}")
-                print(f"freqs_cos: {freqs_cis[0].shape}")
-                print(f"freqs_sin: {freqs_cis[1].shape}")
+                print(
+                    f"latent_model_input: {latent_model_input.shape} {latent_model_input.dtype}"
+                )
+                print(f"timestep: {timestep.shape} {timestep.dtype}")
+                print(f"prompt_embeds: {prompt_embeds.shape} {prompt_embeds.dtype}")
+                print(f"prompt_mask: {prompt_mask.shape} {prompt_mask.dtype}")
+                print(
+                    f"prompt_embeds_2: {prompt_embeds_2.shape} {prompt_embeds_2.dtype}"
+                )
+                print(f"freqs_cos: {freqs_cis[0].shape} {freqs_cis[0].dtype}")
+                print(f"freqs_sin: {freqs_cis[1].shape} {freqs_cis[1].dtype}")
                 if guidance_expand is not None:
-                    print(f"guidance_expand: {guidance_expand.shape}")
+                    print(
+                        f"guidance_expand: {guidance_expand.shape} {guidance_expand.dtype}"
+                    )
 
                 # predict the noise residual
                 noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
