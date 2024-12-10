@@ -515,42 +515,39 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         height: int,
         width: int,
         video_length: int,
-        rope_theta: int,
-        vae_ver: str,
     ):
         target_ndim = 3
         ndim = 5 - 2
         # 884
-        if "884" in vae_ver:
-            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
-        elif "888" in vae_ver:
-            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
-        else:
-            latents_size = [video_length, height // 8, width // 8]
+        latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
 
-        if isinstance(self.transformer.patch_size, int):
-            assert all(s % self.transformer.patch_size == 0 for s in latents_size), (
-                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.transformer.patch_size}), "
+        if isinstance(self.transformer.config.patch_size, int):
+            assert all(
+                s % self.transformer.config.patch_size == 0 for s in latents_size
+            ), (
+                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.transformer.config.patch_size}), "
                 f"but got {latents_size}."
             )
-            rope_sizes = [s // self.transformer.patch_size for s in latents_size]
-        elif isinstance(self.transformer.patch_size, list):
+            rope_sizes = [s // self.transformer.config.patch_size for s in latents_size]
+        elif isinstance(self.transformer.config.patch_size, list):
             assert all(
-                s % self.transformer.patch_size[idx] == 0
+                s % self.transformer.config.patch_size[idx] == 0
                 for idx, s in enumerate(latents_size)
             ), (
-                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.transformer.patch_size}), "
+                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.transformer.config.patch_size}), "
                 f"but got {latents_size}."
             )
             rope_sizes = [
-                s // self.transformer.patch_size[idx]
+                s // self.transformer.config.patch_size[idx]
                 for idx, s in enumerate(latents_size)
             ]
 
         if len(rope_sizes) != target_ndim:
             rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
-        head_dim = self.transformer.hidden_size // self.transformer.heads_num
-        rope_dim_list = self.transformer.rope_dim_list
+        head_dim = (
+            self.transformer.config.hidden_size // self.transformer.config.heads_num
+        )
+        rope_dim_list = self.transformer.config.rope_dim_list
         if rope_dim_list is None:
             rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
         assert (
@@ -559,7 +556,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
             rope_dim_list,
             rope_sizes,
-            theta=rope_theta,
+            theta=256,
             use_real=True,
             theta_rescale_factor=1,
         )
@@ -598,37 +595,16 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         height,
         width,
         video_length,
-        callback_steps,
         negative_prompt=None,
         prompt_embeds=None,
         negative_prompt_embeds=None,
         callback_on_step_end_tensor_inputs=None,
-        vae_ver="88-4c-sd",
     ):
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(
                 f"`height` and `width` have to be divisible by 8 but are {height} and {width}."
             )
 
-        if video_length is not None:
-            if "884" in vae_ver:
-                if video_length != 1 and (video_length - 1) % 4 != 0:
-                    raise ValueError(
-                        f"`video_length` has to be 1 or a multiple of 4 but is {video_length}."
-                    )
-            elif "888" in vae_ver:
-                if video_length != 1 and (video_length - 1) % 8 != 0:
-                    raise ValueError(
-                        f"`video_length` has to be 1 or a multiple of 8 but is {video_length}."
-                    )
-
-        if callback_steps is not None and (
-            not isinstance(callback_steps, int) or callback_steps <= 0
-        ):
-            raise ValueError(
-                f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
-                f" {type(callback_steps)}."
-            )
         if callback_on_step_end_tensor_inputs is not None and not all(
             k in self._callback_tensor_inputs
             for k in callback_on_step_end_tensor_inputs
@@ -776,14 +752,15 @@ class HunyuanVideoPipeline(DiffusionPipeline):
     def __call__(
         self,
         prompt: Union[str, List[str]],
-        height: int,
-        width: int,
-        video_length: int,
-        prompt_template: Optional[str] = PROMPT_TEMPLATE["dit-llm-encode-video"],
+        height: int = 768,
+        width: int = 1260,
+        video_length: int = 129,
+        prompt_template: Optional[Dict] = PROMPT_TEMPLATE["dit-llm-encode-video"],
         num_inference_steps: int = 50,
         timesteps: List[int] = None,
         sigmas: List[float] = None,
-        guidance_scale: float = 7.5,
+        guidance_scale: float = 1.0,
+        embedded_guidance_scale: Optional[float] = 6.0,
         negative_prompt: Optional[Union[str, List[str]]] = None,
         num_videos_per_prompt: Optional[int] = 1,
         eta: float = 0.0,
@@ -806,9 +783,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             ]
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
-        rope_theta: int = 256,
-        vae_ver: str = "884-16c-hy",
-        embedded_guidance_scale: Optional[float] = None,
         **kwargs,
     ):
         r"""
@@ -892,22 +866,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 second element is a list of `bool`s indicating whether the corresponding generated image contains
                 "not-safe-for-work" (nsfw) content.
         """
-        callback = kwargs.pop("callback", None)
-        callback_steps = kwargs.pop("callback_steps", None)
-
-        if callback is not None:
-            deprecate(
-                "callback",
-                "1.0.0",
-                "Passing `callback` as an input argument to `__call__` is deprecated, consider using `callback_on_step_end`",
-            )
-        if callback_steps is not None:
-            deprecate(
-                "callback_steps",
-                "1.0.0",
-                "Passing `callback_steps` as an input argument to `__call__` is deprecated, consider using `callback_on_step_end`",
-            )
-
         if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
@@ -922,12 +880,10 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             height,
             width,
             video_length,
-            callback_steps,
             negative_prompt,
             prompt_embeds,
             negative_prompt_embeds,
             callback_on_step_end_tensor_inputs,
-            vae_ver=vae_ver,
         )
 
         self._guidance_scale = guidance_scale
@@ -944,16 +900,16 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        device = self._execution_device
+        # TODO(aryan): No idea why it won't run without this
+        device = torch.device(self._execution_device)
 
         freqs_cis = self.get_rotary_pos_embed(
             height=height,
             width=width,
             video_length=video_length,
-            rope_theta=rope_theta,
-            vae_ver=vae_ver,
         )
-        n_tokens = freqs_cis[0].shape[0]
+        target_dtype = self.transformer.dtype
+        vae_dtype = self.vae.dtype
 
         # 3. Encode input prompt
         if prompt_embeds is None:
@@ -1001,24 +957,15 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 prompt_mask_2 = torch.cat([negative_prompt_mask_2, prompt_mask_2])
 
         # 4. Prepare timesteps
-        extra_set_timesteps_kwargs = self.prepare_extra_func_kwargs(
-            self.scheduler.set_timesteps, {"n_tokens": n_tokens}
-        )
         timesteps, num_inference_steps = retrieve_timesteps(
             self.scheduler,
             num_inference_steps,
             device,
             timesteps,
             sigmas,
-            **extra_set_timesteps_kwargs,
         )
 
-        if "884" in vae_ver:
-            video_length = (video_length - 1) // 4 + 1
-        elif "888" in vae_ver:
-            video_length = (video_length - 1) // 8 + 1
-        else:
-            video_length = video_length
+        video_length = (video_length - 1) // 4 + 1
 
         # 5. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
@@ -1028,17 +975,19 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             height,
             width,
             video_length,
-            prompt_embeds.dtype,
+            target_dtype,
             device,
             generator,
             latents,
         )
 
-        # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
-        extra_step_kwargs = self.prepare_extra_func_kwargs(
-            self.scheduler.step,
-            {"generator": generator, "eta": eta},
-        )
+        # 6. Convert typing
+        prompt_embeds = prompt_embeds.to(target_dtype)
+        prompt_mask = prompt_mask.to(target_dtype)
+        if prompt_embeds_2 is not None:
+            prompt_embeds_2 = prompt_embeds_2.to(target_dtype)
+        if prompt_mask_2 is not None:
+            prompt_mask_2 = prompt_mask_2.to(target_dtype)
 
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -1060,11 +1009,12 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     latent_model_input, t
                 )
 
-                t_expand = t.repeat(latent_model_input.shape[0])
+                # copied via a-r-r-o-w diffusers pull request
+                timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
                 guidance_expand = (
                     torch.tensor(
                         [embedded_guidance_scale] * latent_model_input.shape[0],
-                        dtype=self.transformer.dtype,
+                        dtype=torch.float32,
                         device=device,
                     )
                     * 1000.0
@@ -1075,7 +1025,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 # Log shapes of all inputs going into transformer
                 print("Input shapes:")
                 print(f"latent_model_input: {latent_model_input.shape}")
-                print(f"t_expand: {t_expand.shape}")
+                print(f"timestep: {timestep.shape}")
                 print(f"prompt_embeds: {prompt_embeds.shape}")
                 print(f"prompt_mask: {prompt_mask.shape}")
                 print(f"prompt_embeds_2: {prompt_embeds_2.shape}")
@@ -1087,7 +1037,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 # predict the noise residual
                 noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
                     latent_model_input,  # [2, 16, 33, 24, 42]
-                    t_expand,  # [2]
+                    timestep,  # [2]
                     text_states=prompt_embeds,  # [2, 256, 4096]
                     text_mask=prompt_mask,  # [2, 256]
                     text_states_2=prompt_embeds_2,  # [2, 768]
@@ -1114,7 +1064,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(
-                    noise_pred, t, latents, **extra_step_kwargs, return_dict=False
+                    noise_pred, t, latents, return_dict=False
                 )[0]
 
                 if callback_on_step_end is not None:
@@ -1135,10 +1085,11 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 ):
                     if progress_bar is not None:
                         progress_bar.update()
-                    if callback is not None and i % callback_steps == 0:
-                        step_idx = i // getattr(self.scheduler, "order", 1)
-                        callback(step_idx, t, latents)
 
+        # convert to vae dtype
+        latents = latents.to(vae_dtype)
+
+        # decode if latents not explicitly requested
         if not output_type == "latent":
             expand_temporal_dim = False
             if len(latents.shape) == 4:
@@ -1163,13 +1114,12 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             else:
                 latents = latents / self.vae.config.scaling_factor
 
-            image = self.vae.decode(
-                latents.to(self.vae.dtype), return_dict=False, generator=generator
-            )[0]
+            image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
 
             if expand_temporal_dim or image.shape[2] == 1:
                 image = image.squeeze(2)
 
+        # otherwise, just return the latents
         else:
             image = latents
 

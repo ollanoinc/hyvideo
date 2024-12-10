@@ -436,20 +436,9 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         )
 
         # text projection
-        if self.text_projection == "linear":
-            self.txt_in = TextProjection(
-                self.text_states_dim,
-                self.hidden_size,
-                get_activation_layer("silu"),
-            )
-        elif self.text_projection == "single_refiner":
-            self.txt_in = SingleTokenRefiner(
-                self.text_states_dim, hidden_size, heads_num, depth=2
-            )
-        else:
-            raise NotImplementedError(
-                f"Unsupported text_projection: {self.text_projection}"
-            )
+        self.txt_in = SingleTokenRefiner(
+            self.text_states_dim, hidden_size, heads_num, depth=2
+        )
 
         # time modulation
         self.time_in = TimestepEmbedder(self.hidden_size, get_activation_layer("silu"))
