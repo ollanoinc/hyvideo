@@ -333,7 +333,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 uncond_tokens = negative_prompt
 
             if prompt_template is not None:
-                uncond_tokens = self._apply_template(
+                uncond_tokens = self._apply_prompt_template(
                     uncond_tokens, prompt_template["template"]
                 )
 
@@ -975,7 +975,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 negative_prompt_embeds_2,
                 prompt_mask_2,
                 negative_prompt_mask_2,
-            ) = self.encode_prompt(
+            ) = self._get_clip_prompt_embeds(
                 prompt,
                 num_videos_per_prompt=num_videos_per_prompt,
                 clip_skip=self.clip_skip,
