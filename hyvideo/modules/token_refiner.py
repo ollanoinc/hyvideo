@@ -191,6 +191,7 @@ class SingleTokenRefiner(nn.Module):
         t: torch.LongTensor,
         mask: Optional[torch.LongTensor] = None,
     ):
+        original_dtype = x.dtype
         timestep_aware_representations = self.t_embedder(t)
 
         if mask is None:
@@ -200,6 +201,9 @@ class SingleTokenRefiner(nn.Module):
             context_aware_representations = (x * mask_float).sum(
                 dim=1
             ) / mask_float.sum(dim=1)
+            context_aware_representations = context_aware_representations.to(
+                original_dtype
+            )
         context_aware_representations = self.c_embedder(context_aware_representations)
         c = timestep_aware_representations + context_aware_representations
 
