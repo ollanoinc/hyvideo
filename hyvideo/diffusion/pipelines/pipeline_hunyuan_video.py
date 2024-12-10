@@ -968,9 +968,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     if self.do_classifier_free_guidance
                     else latents
                 )
-                latent_model_input = self.scheduler.scale_model_input(
-                    latent_model_input, t
-                )
 
                 # copied via a-r-r-o-w diffusers pull request
                 timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
