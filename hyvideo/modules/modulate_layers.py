@@ -16,9 +16,6 @@ class ModulateDiT(nn.Module):
         super().__init__()
         self.act = act_layer()
         self.linear = nn.Linear(hidden_size, factor * hidden_size, bias=True)
-        # Zero-initialize the modulation
-        nn.init.zeros_(self.linear.weight)
-        nn.init.zeros_(self.linear.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(self.act(x))

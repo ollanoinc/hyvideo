@@ -58,9 +58,6 @@ class IndividualTokenRefinerBlock(nn.Module):
             act_layer(),
             nn.Linear(hidden_size, 2 * hidden_size, bias=True),
         )
-        # Zero-initialize the modulation
-        nn.init.zeros_(self.adaLN_modulation[1].weight)
-        nn.init.zeros_(self.adaLN_modulation[1].bias)
 
     def forward(
         self,

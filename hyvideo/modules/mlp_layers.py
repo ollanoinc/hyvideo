@@ -84,17 +84,12 @@ class FinalLayer(nn.Module):
                 patch_size[0] * patch_size[1] * patch_size[2] * out_channels,
                 bias=True,
             )
-        nn.init.zeros_(self.linear.weight)
-        nn.init.zeros_(self.linear.bias)
 
         # Here we don't distinguish between the modulate types. Just use the simple one.
         self.adaLN_modulation = nn.Sequential(
             act_layer(),
             nn.Linear(hidden_size, 2 * hidden_size, bias=True),
         )
-        # Zero-initialize the modulation
-        nn.init.zeros_(self.adaLN_modulation[1].weight)
-        nn.init.zeros_(self.adaLN_modulation[1].bias)
 
     def forward(self, x, c):
         shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
