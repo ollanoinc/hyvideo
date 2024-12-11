@@ -952,25 +952,6 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     else None
                 )
 
-                # Log shapes of all inputs going into transformer
-                print("Input shapes:")
-                print(
-                    f"latent_model_input: {latent_model_input.shape} {latent_model_input.dtype}"
-                )
-                print(f"timestep: {timestep.shape} {timestep.dtype}")
-                print(f"prompt_embeds: {prompt_embeds.shape} {prompt_embeds.dtype}")
-                print(f"prompt_mask: {prompt_mask.shape} {prompt_mask.dtype}")
-                if prompt_embeds_2 is not None:
-                    print(
-                        f"prompt_embeds_2: {prompt_embeds_2.shape} {prompt_embeds_2.dtype}"
-                    )
-                print(f"freqs_cos: {freqs_cos.shape} {freqs_cos.dtype}")
-                print(f"freqs_sin: {freqs_sin.shape} {freqs_sin.dtype}")
-                if guidance_expand is not None:
-                    print(
-                        f"guidance_expand: {guidance_expand.shape} {guidance_expand.dtype}"
-                    )
-
                 # predict the noise residual
                 noise_pred = self.transformer(  # For an input image (129, 192, 336) (1, 256, 256)
                     latent_model_input,  # [2, 16, 33, 24, 42]
