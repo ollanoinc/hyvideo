@@ -14,7 +14,7 @@ This library is provided as-is and will be superseded by the official release of
 ## Installation
 
 ```bash
-pip install hyvideo
+pip install git+https://github.com/ollanoinc/hyvideo.git
 ```
 
 You will also need to install [flash-attn](https://github.com/Dao-AILab/flash-attention) for now.
