@@ -276,7 +276,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             output_hidden_states=True,
             return_dict=True,
         ).hidden_states[
-            -1
+            -3
         ]  # Get last hidden state
 
         attention_mask = text_inputs.attention_mask
@@ -312,7 +312,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                 attention_mask=uncond_input.attention_mask.to(device),
                 output_hidden_states=True,
                 return_dict=True,
-            ).hidden_states[-1]
+            ).hidden_states[-3]
 
             negative_attention_mask = uncond_input.attention_mask
 
