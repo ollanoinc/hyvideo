@@ -6,9 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 try:
-    from flash_attn.flash_attn_interface import flash_attn_varlen_func
+    from sageattention import sageattn_varlen
 except ImportError:
-    flash_attn_varlen_func = None
+    sageattn_varlen = None
 
 
 MEMORY_LAYOUT = {
@@ -101,7 +101,7 @@ def attention(
             q, k, v, attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal
         )
     elif mode == "flash":
-        x = flash_attn_varlen_func(
+        x = sageattn_varlen(
             q,
             k,
             v,
