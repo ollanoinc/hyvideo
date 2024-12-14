@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 try:
+    # use sageattention
     from sageattention import sageattn_varlen
 except ImportError:
     sageattn_varlen = None
